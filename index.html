@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Administración de Ganado</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="brand">
+            <i data-lucide="beef"></i>
+            <span>GanadoPro</span>
+        </div>
+        <ul class="nav-links">
+            <li><a href="#" class="nav-link active" id="nav-dashboard"><i data-lucide="layout-dashboard"></i> Dashboard</a></li>
+            <li><a href="#" class="nav-link" id="nav-animals"><i data-lucide="list"></i> Mis Animales</a></li>
+            <li><a href="#" class="nav-link" id="nav-treatments"><i data-lucide="syringe"></i> Tratamientos</a></li>
+        </ul>
+        <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px;">
+            <button class="btn btn-secondary" onclick="document.getElementById('importFile').click()" style="justify-content: center;">
+                <i data-lucide="upload-cloud"></i> Importar Datos
+            </button>
+            <input type="file" id="importFile" accept=".json" class="hidden" onchange="handleImport(event)">
+            
+            <button class="btn btn-secondary" onclick="openExportModal()" style="justify-content: center;">
+                <i data-lucide="download-cloud"></i> Exportar Datos
+            </button>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <!-- Dashboard Section -->
+        <section id="section-dashboard">
+            <div class="header">
+                <h1>Resumen del Hato</h1>
+                <button class="btn btn-primary" onclick="openModal()"><i data-lucide="plus"></i> Nuevo Animal</button>
+            </div>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon"><i data-lucide="beef"></i></div>
+                    <div class="stat-info">
+                        <h3>Total de Animales</h3>
+                        <p id="stat-total">0</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon"><i data-lucide="activity"></i></div>
+                    <div class="stat-info">
+                        <h3>Peso Promedio (Kg)</h3>
+                        <p id="stat-weight">0</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon"><i data-lucide="calendar"></i></div>
+                    <div class="stat-info">
+                        <h3>Registrados este mes</h3>
+                        <p id="stat-month">0</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Animals Section -->
+        <section id="section-animals" class="hidden">
+            <div class="header">
+                <h1>Mis Animales</h1>
+                <button class="btn btn-primary" onclick="openModal()"><i data-lucide="plus"></i> Nuevo Animal</button>
+            </div>
+
+            <div class="table-container">
+                <div class="table-header-controls">
+                    <div class="search-box">
+                        <i data-lucide="search"></i>
+                        <input type="text" id="searchInput" placeholder="Buscar por placa o nombre..." onkeyup="renderTable()">
+                    </div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Foto</th>
+                            <th></th> <!-- View Button Column -->
+                            <th>N° Placa</th>
+                            <th>Nombre</th>
+                            <th>Raza</th>
+                            <th>Edad / Nacimiento</th>
+                            <th>Peso (Kg)</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                        <!-- Rows will be populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Treatments Section -->
+        <section id="section-treatments" class="hidden">
+            <div class="header">
+                <h1>Tratamientos Médicos</h1>
+                <button class="btn btn-primary" onclick="openTreatmentModal()"><i data-lucide="plus"></i> Nuevo Tratamiento</button>
+            </div>
+
+            <div class="table-container">
+                <div class="table-header-controls">
+                    <div class="search-box">
+                        <i data-lucide="search"></i>
+                        <input type="text" id="searchTreatmentInput" placeholder="Buscar por placa, diagnóstico..." onkeyup="renderTreatmentsTable()">
+                    </div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>N° Placa</th>
+                            <th>Diagnóstico</th>
+                            <th>Veterinario</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="treatments-table-body">
+                        <!-- Rows will be populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal for Create/Edit Animal -->
+    <div class="modal-overlay" id="animalModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Registrar Animal</h2>
+                <button class="modal-close" onclick="closeModal()"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="animalForm" onsubmit="handleFormSubmit(event)">
+                    <input type="hidden" id="animalId">
+                    
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>N° de Placa *</label>
+                            <input type="text" id="tagNumber" class="form-control" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Nombre (Opcional)</label>
+                            <input type="text" id="name" class="form-control">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Fecha de Nacimiento</label>
+                            <input type="date" id="birthDate" class="form-control" onchange="calculateAge()">
+                        </div>
+                        <div class="form-group">
+                            <label>Edad (Meses) - Calculada o Manual</label>
+                            <input type="number" id="ageMonths" class="form-control" min="0">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Fecha de Adquisición</label>
+                            <input type="date" id="acquisitionDate" class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label>Raza</label>
+                            <input type="text" id="breed" class="form-control">
+                        </div>
+
+                        <div class="form-group">
+                            <label>N° Placa Madre (Opcional)</label>
+                            <input type="text" id="motherTag" class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label>N° Placa Padre (Opcional)</label>
+                            <input type="text" id="fatherTag" class="form-control">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Peso (Kg)</label>
+                            <input type="number" id="weightKg" class="form-control" step="0.1" min="0">
+                        </div>
+
+                        <div class="form-group full-width">
+                            <label>Fotografía</label>
+                            <div class="image-upload-wrapper">
+                                <div class="image-preview" id="imagePreview">
+                                    <i data-lucide="camera"></i>
+                                </div>
+                                <label class="btn-upload">
+                                    Seleccionar Imagen
+                                    <input type="file" id="imageInput" accept="image/png, image/jpeg" onchange="handleImageSelect(event)">
+                                </label>
+                            </div>
+                            <input type="hidden" id="imageDataUrl">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="form-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                <button type="submit" form="animalForm" class="btn btn-primary">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Treatments -->
+    <div class="modal-overlay" id="treatmentModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="treatmentModalTitle">Registrar Tratamiento</h2>
+                <button class="modal-close" onclick="closeTreatmentModal()"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="treatmentForm" onsubmit="handleTreatmentSubmit(event)">
+                    <input type="hidden" id="treatmentId">
+                    
+                    <div class="form-grid">
+                        <div class="form-group full-width">
+                            <label>Seleccionar Animal (N° de Placa) *</label>
+                            <select id="t_animalId" class="form-control" onchange="autoFillAnimalData()" required>
+                                <option value="">-- Seleccione un animal --</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Nombre del Animal</label>
+                            <input type="text" id="t_animalName" class="form-control" disabled>
+                        </div>
+                        <div class="form-group">
+                            <label>Edad / Nacimiento</label>
+                            <input type="text" id="t_animalAge" class="form-control" disabled>
+                        </div>
+
+                        <div class="form-group full-width">
+                            <label>Fecha del Tratamiento *</label>
+                            <input type="date" id="t_date" class="form-control" required>
+                        </div>
+
+                        <div class="form-group full-width">
+                            <label>Diagnóstico *</label>
+                            <input type="text" id="t_diagnosis" class="form-control" required>
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Tratamiento / Medicamentos *</label>
+                            <textarea id="t_treatment" class="form-control" rows="3" required></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Nombre del Veterinario</label>
+                            <input type="text" id="t_vetName" class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label>Contacto del Veterinario</label>
+                            <input type="text" id="t_vetContact" class="form-control" placeholder="Teléfono o Email">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="form-footer">
+                <button class="btn btn-secondary" onclick="closeTreatmentModal()">Cancelar</button>
+                <button type="submit" form="treatmentForm" class="btn btn-primary">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tooltip -->
+    <div id="animalTooltip" class="tooltip hidden">
+        <div class="tooltip-content"></div>
+    </div>
+
+    <!-- Treatment Tooltip -->
+    <div id="treatmentTooltip" class="tooltip hidden">
+        <div class="tooltip-content"></div>
+    </div>
+
+    <!-- Export Modal -->
+    <div class="modal-overlay" id="exportModal">
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header">
+                <h2>Exportar Datos</h2>
+                <button class="modal-close" onclick="closeExportModal()"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Formato de Exportación</label>
+                    <select id="exportFormat" class="form-control">
+                        <option value="json">Copia de Seguridad (JSON) - Para restaurar datos</option>
+                        <option value="pdf">Documento (PDF) - Para leer o imprimir</option>
+                        <option value="xml">Datos Estructurados (XML)</option>
+                    </select>
+                </div>
+                <div style="background: rgba(16, 185, 129, 0.1); border-left: 3px solid var(--accent); padding: 0.75rem; margin-top: 1.5rem; border-radius: 0.25rem;">
+                    <p style="font-size: 0.8rem; color: var(--text-primary); margin: 0;">
+                        <strong>Importante:</strong> Solo el formato <strong>JSON</strong> se puede usar para <em>Importar Datos</em> posteriormente.
+                    </p>
+                </div>
+            </div>
+            <div class="form-footer">
+                <button class="btn btn-secondary" onclick="closeExportModal()">Cancelar</button>
+                <button class="btn btn-primary" onclick="executeExport()"><i data-lucide="download"></i> Descargar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <script src="db.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
