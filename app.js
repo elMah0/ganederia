@@ -692,16 +692,53 @@ async function executeBackup() {
     closeBackupModal();
 
     if (selected === 'local') {
-        try {
-            // Realiza respaldo completo local (JSON completo)
-            await exportDatabase('json');
-            // Nota: exportDatabase('json') ya maneja la descarga
-        } catch (err) {
-            alert("Error al realizar el respaldo local: " + err.message);
-        }
+        await saveBackupToFolder();
     } else if (selected === 'cloud') {
         // Función experimental - aún no implementada
         alert("Función experimental: Exportar a la nube aún no está disponible.\n\nEsta opción se habilitará en futuras actualizaciones.");
+    }
+}
+
+async function saveBackupToFolder() {
+    // Check if the modern File System Access API is available
+    if (!window.showDirectoryPicker) {
+        alert("Tu navegador no soporta guardar directamente en carpetas.\nSe descargará el archivo en la carpeta de Descargas.");
+        await exportDatabase('json');
+        return;
+    }
+
+    try {
+        // Let the user choose the destination folder (they can pick the program's folder)
+        const dirHandle = await window.showDirectoryPicker({
+            mode: 'readwrite',
+            startIn: 'documents' // Suggests a starting location (user can navigate to the app folder)
+        });
+
+        // Get fresh data from IndexedDB
+        const animals = await getAllAnimals();
+        const treatments = await getAllTreatments();
+
+        const dateStr = new Date().toISOString().split('T')[0];
+        const filename = `ganado_backup_${dateStr}.json`;
+
+        const exportData = { animals, treatments };
+        const jsonString = JSON.stringify(exportData, null, 2);
+
+        // Create or overwrite the file in the chosen folder
+        const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(jsonString);
+        await writable.close();
+
+        alert(`✅ Respaldo guardado exitosamente:\n\nCarpeta: ${dirHandle.name}\nArchivo: ${filename}`);
+
+    } catch (err) {
+        if (err.name === 'AbortError') {
+            // User cancelled the folder picker - do nothing
+            return;
+        }
+        console.error(err);
+        alert("Error al guardar el respaldo: " + err.message);
     }
 }
 
