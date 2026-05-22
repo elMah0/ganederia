@@ -57,6 +57,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function loadData() {
     currentAnimals = await getAllAnimals();
+    // Ordenar animales por número de placa (orden natural alfanumérico)
+    currentAnimals.sort((a, b) => a.tagNumber.localeCompare(b.tagNumber, undefined, { numeric: true, sensitivity: 'base' }));
     currentTreatments = await getAllTreatments();
     updateDashboard();
     renderTable();
@@ -79,6 +81,9 @@ function updateDashboard() {
         return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
     }).length;
     document.getElementById('stat-month').innerText = addedThisMonth;
+
+    renderCalendar();
+    renderReminders();
 }
 
 function renderTable() {
@@ -146,13 +151,16 @@ function renderTreatmentsTable() {
 
     filtered.forEach(t => {
         const tr = document.createElement('tr');
+        const nextAppt = t.nextAppointment ? t.nextAppointment : '-';
         tr.innerHTML = `
             <td>${t.date}</td>
             <td>${t.tagNumber}</td>
+            <td><button class="btn-icon view-treatment-btn" data-id="${t.id}" title="Previsualizar"><i data-lucide="eye"></i></button></td>
             <td>${t.diagnosis}</td>
             <td>${t.vetName || '-'}</td>
+            <td>${nextAppt}</td>
             <td class="actions">
-                <button class="btn-icon view-treatment-btn" data-id="${t.id}" title="Previsualizar"><i data-lucide="eye"></i></button>
+                <button class="btn-icon" onclick="editTreatment(${t.id})" title="Editar"><i data-lucide="edit-2"></i></button>
                 <button class="btn-icon delete" onclick="removeTreatment(${t.id})" title="Eliminar"><i data-lucide="trash-2"></i></button>
             </td>
         `;
@@ -272,6 +280,8 @@ function openTreatmentModal() {
     document.getElementById('t_date').value = new Date().toISOString().split('T')[0];
     document.getElementById('t_animalName').value = '';
     document.getElementById('t_animalAge').value = '';
+    document.getElementById('t_nextAppointment').value = '';
+    document.getElementById('treatmentModalTitle').innerText = 'Registrar Tratamiento';
     
     // Populate select
     const select = document.getElementById('t_animalId');
@@ -285,6 +295,25 @@ function openTreatmentModal() {
 
     treatmentModal.classList.add('active');
     lucide.createIcons();
+}
+
+async function editTreatment(id) {
+    const treatment = currentTreatments.find(t => t.id === Number(id));
+    if (!treatment) return;
+
+    openTreatmentModal();
+
+    document.getElementById('treatmentId').value = treatment.id;
+    document.getElementById('treatmentModalTitle').innerText = 'Editar Tratamiento';
+    document.getElementById('t_animalId').value = treatment.animalId;
+    autoFillAnimalData();
+
+    document.getElementById('t_date').value = treatment.date;
+    document.getElementById('t_diagnosis').value = treatment.diagnosis;
+    document.getElementById('t_treatment').value = treatment.treatmentText;
+    document.getElementById('t_vetName').value = treatment.vetName || '';
+    document.getElementById('t_vetContact').value = treatment.vetContact || '';
+    document.getElementById('t_nextAppointment').value = treatment.nextAppointment || '';
 }
 
 function closeTreatmentModal() {
@@ -307,6 +336,7 @@ function autoFillAnimalData() {
 async function handleTreatmentSubmit(e) {
     e.preventDefault();
     
+    const id = document.getElementById('treatmentId').value;
     const animalId = document.getElementById('t_animalId').value;
     const animal = currentAnimals.find(a => a.id === Number(animalId));
     if (!animal) return;
@@ -319,10 +349,26 @@ async function handleTreatmentSubmit(e) {
         treatmentText: document.getElementById('t_treatment').value.trim(),
         vetName: document.getElementById('t_vetName').value.trim(),
         vetContact: document.getElementById('t_vetContact').value.trim(),
-        createdAt: new Date().toISOString()
+        nextAppointment: document.getElementById('t_nextAppointment').value || null,
+        appointmentStatus: null,
+        updatedAt: new Date().toISOString()
     };
 
-    await addTreatment(treatment);
+    if (id) {
+        treatment.id = Number(id);
+        const existing = currentTreatments.find(t => t.id === treatment.id);
+        treatment.createdAt = existing ? existing.createdAt : new Date().toISOString();
+        if (existing && existing.nextAppointment === treatment.nextAppointment) {
+            treatment.appointmentStatus = existing.appointmentStatus || null;
+        } else {
+            treatment.appointmentStatus = null;
+        }
+        await updateTreatment(treatment);
+    } else {
+        treatment.createdAt = new Date().toISOString();
+        await addTreatment(treatment);
+    }
+
     closeTreatmentModal();
     await loadData();
 }
@@ -397,9 +443,26 @@ async function handleImport(e) {
     if (!file) return;
 
     const reader = new FileReader();
+    const isXlsx = file.name.toLowerCase().endsWith('.xlsx');
+
     reader.onload = async function(event) {
         try {
-            await importDatabase(event.target.result);
+            if (isXlsx) {
+                // Parse XLSX using the loaded SheetJS library
+                const wb = XLSX.read(event.target.result, { type: 'array' });
+                
+                // Prefer sheets named "Animals" and "Treatments", fallback to first two sheets
+                const animalsSheet = wb.Sheets['Animals'] || wb.Sheets[wb.SheetNames[0]];
+                const treatmentsSheet = wb.Sheets['Treatments'] || wb.Sheets[wb.SheetNames[1]] || null;
+
+                const animals = animalsSheet ? XLSX.utils.sheet_to_json(animalsSheet) : [];
+                const treatments = treatmentsSheet ? XLSX.utils.sheet_to_json(treatmentsSheet) : [];
+
+                await importDatabase({ animals, treatments });
+            } else {
+                // JSON backup
+                await importDatabase(event.target.result);
+            }
             alert("Datos importados exitosamente.");
             await loadData();
         } catch (err) {
@@ -407,7 +470,12 @@ async function handleImport(e) {
         }
         e.target.value = ''; // reset
     };
-    reader.readAsText(file);
+
+    if (isXlsx) {
+        reader.readAsArrayBuffer(file);
+    } else {
+        reader.readAsText(file);
+    }
 }
 
 // Tooltip Logic
@@ -533,18 +601,307 @@ const exportModal = document.getElementById('exportModal');
 function openExportModal() {
     exportModal.classList.add('active');
     lucide.createIcons();
+
+    // Default to PDF + completo when opening
+    const formatSelect = document.getElementById('exportFormat');
+    const completoRadio = document.querySelector('input[name="reportType"][value="completo"]');
+    if (completoRadio) completoRadio.checked = true;
+
+    // Attach visibility listeners (safe to call multiple times)
+    if (formatSelect) {
+        formatSelect.onchange = updateExportOptionsVisibility;
+    }
+
+    const radios = document.querySelectorAll('input[name="reportType"]');
+    radios.forEach(r => {
+        r.onchange = updateExportOptionsVisibility;
+    });
+
+    updateExportOptionsVisibility();
 }
 
 function closeExportModal() {
     exportModal.classList.remove('active');
 }
 
+function updateExportOptionsVisibility() {
+    const format = document.getElementById('exportFormat').value;
+    const reportGroup = document.getElementById('reportTypeGroup');
+    const compactDiv = document.getElementById('compactOptions');
+
+    const showReportOptions = format === 'pdf' || format === 'xlsx';
+    reportGroup.style.display = showReportOptions ? 'block' : 'none';
+
+    const reportType = document.querySelector('input[name="reportType"]:checked')?.value || 'completo';
+    const showCompact = showReportOptions && reportType === 'compacto';
+
+    compactDiv.style.display = showCompact ? 'block' : 'none';
+}
+
 async function executeExport() {
     const format = document.getElementById('exportFormat').value;
+
+    let exportOptions = {
+        reportType: 'completo'
+    };
+
+    if (format === 'pdf' || format === 'xlsx') {
+        const reportType = document.querySelector('input[name="reportType"]:checked')?.value || 'completo';
+        exportOptions.reportType = reportType;
+
+        if (reportType === 'compacto') {
+            const animalFields = Array.from(
+                document.querySelectorAll('.compact-field[data-section="animal"]:checked')
+            ).map(cb => cb.value);
+
+            const treatmentFields = Array.from(
+                document.querySelectorAll('.compact-field[data-section="treatment"]:checked')
+            ).map(cb => cb.value);
+
+            exportOptions.animalFields = animalFields;
+            exportOptions.treatmentFields = treatmentFields;
+        }
+    }
+
     try {
-        await exportDatabase(format);
+        await exportDatabase(format, exportOptions);
         closeExportModal();
     } catch (err) {
         alert("Error exportando datos: " + err.message);
     }
+}
+
+// =============================================
+// Backup Modal Logic (Respaldar base de datos)
+// =============================================
+
+const backupModal = document.getElementById('backupModal');
+
+function openBackupModal() {
+    backupModal.classList.add('active');
+    lucide.createIcons();
+}
+
+function closeBackupModal() {
+    backupModal.classList.remove('active');
+}
+
+async function executeBackup() {
+    const selected = document.querySelector('input[name="backupType"]:checked')?.value || 'local';
+
+    closeBackupModal();
+
+    if (selected === 'local') {
+        try {
+            // Realiza respaldo completo local (JSON completo)
+            await exportDatabase('json');
+            // Nota: exportDatabase('json') ya maneja la descarga
+        } catch (err) {
+            alert("Error al realizar el respaldo local: " + err.message);
+        }
+    } else if (selected === 'cloud') {
+        // Función experimental - aún no implementada
+        alert("Función experimental: Exportar a la nube aún no está disponible.\n\nEsta opción se habilitará en futuras actualizaciones.");
+    }
+}
+
+// =============================================
+// Calendar & Reminders Logic
+// =============================================
+
+let calendarDate = new Date(); // tracks the displayed month/year
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('prev-month').addEventListener('click', () => {
+        calendarDate.setMonth(calendarDate.getMonth() - 1);
+        renderCalendar();
+    });
+    document.getElementById('next-month').addEventListener('click', () => {
+        calendarDate.setMonth(calendarDate.getMonth() + 1);
+        renderCalendar();
+    });
+});
+
+function getDateAppointmentStatus(dateStr) {
+    const relevant = currentTreatments.filter(t => t.nextAppointment === dateStr);
+    if (relevant.length === 0) return null;
+
+    const hasFulfilled = relevant.some(t => t.appointmentStatus === 'fulfilled');
+    if (hasFulfilled) return 'fulfilled';
+
+    const hasMissed = relevant.some(t => t.appointmentStatus === 'missed');
+    if (hasMissed) return 'missed';
+
+    return 'pending';
+}
+
+function renderCalendar() {
+    const container = document.getElementById('calendar-days-container');
+    const monthYearLabel = document.getElementById('calendar-month-year');
+    if (!container || !monthYearLabel) return;
+
+    const year = calendarDate.getFullYear();
+    const month = calendarDate.getMonth();
+
+    const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                        'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    monthYearLabel.textContent = `${monthNames[month]} ${year}`;
+
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+
+    // First day of month (0=Sun, 6=Sat)
+    const firstDay = new Date(year, month, 1).getDay();
+    // Total days in month
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    container.innerHTML = '';
+
+    // Empty cells before first day
+    for (let i = 0; i < firstDay; i++) {
+        const empty = document.createElement('div');
+        empty.classList.add('calendar-day', 'empty');
+        container.appendChild(empty);
+    }
+
+    // Day cells
+    for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const cell = document.createElement('div');
+        cell.classList.add('calendar-day');
+        cell.textContent = d;
+
+        if (dateStr === todayStr) cell.classList.add('today');
+
+        const status = getDateAppointmentStatus(dateStr);
+        if (status) {
+            cell.classList.add('has-appointment', `appointment-${status}`);
+        }
+
+        container.appendChild(cell);
+    }
+
+    lucide.createIcons();
+}
+
+function renderReminders() {
+    const container = document.getElementById('reminders-list-container');
+    if (!container) return;
+
+    // Collect all treatments with a nextAppointment that are not yet marked as fulfilled/missed
+    const reminders = currentTreatments
+        .filter(t => t.nextAppointment && !t.appointmentStatus)
+        .map(t => {
+            const animal = currentAnimals.find(a => a.id === t.animalId);
+            return { ...t, animalName: animal ? animal.name : null };
+        })
+        .sort((a, b) => new Date(a.nextAppointment) - new Date(b.nextAppointment));
+
+    container.innerHTML = '';
+
+    if (reminders.length === 0) {
+        container.innerHTML = `
+            <div class="no-reminders">
+                <i data-lucide="calendar-check" style="width:36px;height:36px;color:var(--text-secondary);opacity:0.5;"></i>
+                <span>Sin citas programadas</span>
+            </div>`;
+        lucide.createIcons();
+        return;
+    }
+
+    const today = new Date();
+    today.setHours(0,0,0,0);
+
+    reminders.forEach(t => {
+        const apptDate = new Date(t.nextAppointment + 'T00:00:00');
+        const diffDays = Math.round((apptDate - today) / (1000 * 60 * 60 * 24));
+
+        let urgencyColor = '#60a5fa'; // default blue
+        let urgencyLabel = '';
+        if (diffDays < 0) {
+            urgencyColor = '#ef4444'; // overdue - red
+            urgencyLabel = ` · <span style="color:#ef4444;font-weight:600;">Vencida (hace ${Math.abs(diffDays)} día${Math.abs(diffDays)!==1?'s':''})</span>`;
+        } else if (diffDays === 0) {
+            urgencyColor = '#f59e0b'; // today - amber
+            urgencyLabel = ` · <span style="color:#f59e0b;font-weight:600;">Hoy</span>`;
+        } else if (diffDays <= 7) {
+            urgencyColor = '#f59e0b'; // soon - amber
+            urgencyLabel = ` · <span style="color:#f59e0b;font-weight:600;">En ${diffDays} día${diffDays!==1?'s':''}</span>`;
+        } else {
+            urgencyLabel = ` · <span style="color:var(--text-secondary);">En ${diffDays} días</span>`;
+        }
+
+        // Format date nicely
+        const [y, mo, day] = t.nextAppointment.split('-');
+        const monthNamesShort = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+        const formattedDate = `${parseInt(day)} ${monthNamesShort[parseInt(mo)-1]} ${y}`;
+
+        const animalLabel = t.animalName ? `${t.tagNumber} <span style="color:var(--text-secondary);">(${t.animalName})</span>` : t.tagNumber;
+
+        let statusHTML = '';
+        if (diffDays < 0) {
+            // Past unmarked appointment: show action tickets to mark outcome
+            statusHTML = `
+                <div class="reminder-ticket">
+                    <span class="ticket-label vencida">Vencida</span>
+                    <button class="ticket-btn fulfilled" data-id="${t.id}">✅ Cumplida</button>
+                    <button class="ticket-btn missed" data-id="${t.id}">❌ No cumplida</button>
+                </div>
+            `;
+        } else {
+            // Future or today: show pending ticket
+            statusHTML = `
+                <div class="reminder-ticket">
+                    <span class="ticket-label pending">Pendiente</span>
+                </div>
+            `;
+        }
+
+        const item = document.createElement('div');
+        item.classList.add('reminder-item');
+        item.innerHTML = `
+            <div class="reminder-date" style="color:${urgencyColor};">
+                <i data-lucide="calendar"></i>
+                ${formattedDate}${urgencyLabel}
+            </div>
+            <div class="reminder-details">
+                🐄 Placa: ${animalLabel}
+            </div>
+            <div class="reminder-meta">
+                <i data-lucide="stethoscope" style="width:12px;height:12px;"></i>
+                ${t.diagnosis}${t.vetName ? ` · ${t.vetName}` : ''}
+            </div>
+            ${statusHTML}
+        `;
+        container.appendChild(item);
+
+        if (diffDays < 0) {
+            item.classList.add('overdue');
+        }
+
+        // Wire up click handlers for the ticket buttons (only for past dates)
+        if (diffDays < 0) {
+            const fBtn = item.querySelector('.ticket-btn.fulfilled');
+            const mBtn = item.querySelector('.ticket-btn.missed');
+            if (fBtn) fBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                markAppointmentStatus(t.id, 'fulfilled');
+            });
+            if (mBtn) mBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                markAppointmentStatus(t.id, 'missed');
+            });
+        }
+    });
+
+    lucide.createIcons();
+}
+
+// Mark appointment status from reminders (fulfilled or missed)
+async function markAppointmentStatus(id, status) {
+    const treatment = currentTreatments.find(t => t.id === id);
+    if (!treatment) return;
+    treatment.appointmentStatus = status;
+    await updateTreatment(treatment);
+    await loadData();
 }

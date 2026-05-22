@@ -146,10 +146,19 @@ function deleteTreatment(id) {
     });
 }
 
-async function exportDatabase(format = 'json') {
+async function exportDatabase(format = 'json', options = {}) {
     const animals = await getAllAnimals();
+    // Ordenar animales por número de placa (orden natural alfanumérico)
+    animals.sort((a, b) => a.tagNumber.localeCompare(b.tagNumber, undefined, { numeric: true, sensitivity: 'base' }));
     const treatments = await getAllTreatments();
     const dateStr = new Date().toISOString().split('T')[0];
+
+    // Determine filename suffix for PDF and XLSX (completo / compacto)
+    let fileSuffix = '';
+    if (format === 'pdf' || format === 'xlsx') {
+        const reportType = options.reportType || 'completo';
+        fileSuffix = reportType === 'compacto' ? '_compacto' : '_completo';
+    }
     
     if (format === 'json') {
         const exportData = { animals, treatments };
@@ -162,38 +171,57 @@ async function exportDatabase(format = 'json') {
         a.click();
         URL.revokeObjectURL(url);
     } 
-    else if (format === 'xml') {
-        let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<GanadoData>\n';
-        xml += '  <Animals>\n';
-        animals.forEach(a => {
-            xml += '    <Animal>\n';
-            for (let key in a) {
-                if (key !== 'image') { // Exclude base64 image from XML to save space
-                    xml += `      <${key}>${a[key] !== null ? a[key] : ''}</${key}>\n`;
-                }
-            }
-            xml += '    </Animal>\n';
-        });
-        xml += '  </Animals>\n';
-        
-        xml += '  <Treatments>\n';
-        treatments.forEach(t => {
-            xml += '    <Treatment>\n';
-            for (let key in t) {
-                xml += `      <${key}>${t[key] !== null ? t[key] : ''}</${key}>\n`;
-            }
-            xml += '    </Treatment>\n';
-        });
-        xml += '  </Treatments>\n';
-        xml += '</GanadoData>';
+    else if (format === 'xlsx') {
+        const reportType = options.reportType || 'completo';
+        const isCompact = reportType === 'compacto';
+        const selectedAnimal = isCompact ? (options.animalFields || []) : null;
+        const selectedTreatment = isCompact ? (options.treatmentFields || []) : null;
 
-        const blob = new Blob([xml], { type: 'application/xml' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `ganado_datos_${dateStr}.xml`;
-        a.click();
-        URL.revokeObjectURL(url);
+        let animalsForExport;
+        let treatmentsForExport = treatments;
+
+        if (isCompact) {
+            // Compact export: only selected columns
+            animalsForExport = animals.map(a => {
+                const row = {};
+                if (selectedAnimal.includes('tagNumber')) row.tagNumber = a.tagNumber;
+                if (selectedAnimal.includes('name')) row.name = a.name || '';
+                if (selectedAnimal.includes('breed')) row.breed = a.breed || '';
+                if (selectedAnimal.includes('birthInfo')) {
+                    row.birthDate = a.birthDate || '';
+                    row.ageMonths = a.ageMonths || '';
+                }
+                if (selectedAnimal.includes('weightKg')) row.weightKg = a.weightKg || '';
+                return row;
+            }).filter(r => Object.keys(r).length > 0);
+
+            treatmentsForExport = treatments.map(t => {
+                const row = {};
+                if (selectedTreatment.includes('date')) row.date = t.date;
+                if (selectedTreatment.includes('tagNumber')) row.tagNumber = t.tagNumber;
+                if (selectedTreatment.includes('diagnosis')) row.diagnosis = t.diagnosis;
+                if (selectedTreatment.includes('treatmentText')) row.treatmentText = t.treatmentText;
+                if (selectedTreatment.includes('vetName')) row.vetName = t.vetName || '';
+                if (selectedTreatment.includes('nextAppointment')) row.nextAppointment = t.nextAppointment || '';
+                return row;
+            }).filter(r => Object.keys(r).length > 0);
+        } else {
+            // Full export (exclude image for size)
+            animalsForExport = animals.map(a => {
+                const { image, ...rest } = a;
+                return rest;
+            });
+            treatmentsForExport = treatments;
+        }
+
+        const wb = XLSX.utils.book_new();
+        const wsAnimals = XLSX.utils.json_to_sheet(animalsForExport);
+        XLSX.utils.book_append_sheet(wb, wsAnimals, "Animals");
+
+        const wsTreatments = XLSX.utils.json_to_sheet(treatmentsForExport);
+        XLSX.utils.book_append_sheet(wb, wsTreatments, "Treatments");
+
+        XLSX.writeFile(wb, `ganado_datos${fileSuffix}_${dateStr}.xlsx`);
     }
     else if (format === 'pdf') {
         const { jsPDF } = window.jspdf;
@@ -204,61 +232,89 @@ async function exportDatabase(format = 'json') {
         doc.setFontSize(11);
         doc.text(`Fecha: ${dateStr}`, 14, 30);
         
-        // Animals Table
-        doc.text("Inventario de Animales", 14, 40);
-        const animalRows = animals.map(a => [
-            a.tagNumber, 
-            a.name || '-', 
-            a.breed || '-', 
-            a.ageMonths ? `${a.ageMonths}m` : (a.birthDate || '-'), 
-            a.weightKg ? `${a.weightKg} kg` : '-'
-        ]);
-        
-        doc.autoTable({
-            startY: 45,
-            head: [['N° Placa', 'Nombre', 'Raza', 'Edad/Nacimiento', 'Peso']],
-            body: animalRows,
-            theme: 'striped',
-            headStyles: { fillColor: [16, 185, 129] }
-        });
-        
+        const reportType = options.reportType || 'completo';
+        const isCompact = reportType === 'compacto';
+        const selectedAnimal = isCompact ? (options.animalFields || []) : ['tagNumber', 'name', 'breed', 'birthInfo', 'weightKg'];
+        const selectedTreatment = isCompact ? (options.treatmentFields || []) : ['date', 'tagNumber', 'diagnosis', 'treatmentText', 'vetName', 'nextAppointment'];
+
+        let currentY = 40;
+
+        // Animals Table (only if fields selected)
+        if (selectedAnimal.length > 0) {
+            doc.text("Inventario de Animales", 14, currentY);
+
+            const animalColumnMap = {
+                tagNumber:   { label: 'N° Placa',        get: a => a.tagNumber },
+                name:        { label: 'Nombre',          get: a => a.name || '-' },
+                breed:       { label: 'Raza',            get: a => a.breed || '-' },
+                birthInfo:   { label: 'Edad/Nacimiento', get: a => a.ageMonths ? `${a.ageMonths}m` : (a.birthDate || '-') },
+                weightKg:    { label: 'Peso',            get: a => a.weightKg ? `${a.weightKg} kg` : '-' }
+            };
+
+            const animalHeaders = selectedAnimal.map(f => animalColumnMap[f]?.label || f);
+            const animalRows = animals.map(a => selectedAnimal.map(f => animalColumnMap[f]?.get(a) ?? '-'));
+
+            doc.autoTable({
+                startY: currentY + 5,
+                head: [animalHeaders],
+                body: animalRows,
+                theme: 'striped',
+                headStyles: { fillColor: [16, 185, 129] }
+            });
+
+            currentY = (doc.lastAutoTable?.finalY || currentY) + 12;
+        }
+
         // Treatments Table
-        let finalY = doc.lastAutoTable.finalY || 45;
-        doc.text("Historial de Tratamientos", 14, finalY + 15);
-        
-        const treatmentRows = treatments.map(t => [
-            t.date,
-            t.tagNumber,
-            t.diagnosis,
-            t.treatmentText,
-            t.vetName || '-'
-        ]);
-        
-        doc.autoTable({
-            startY: finalY + 20,
-            head: [['Fecha', 'N° Placa', 'Diagnóstico', 'Tratamiento', 'Veterinario']],
-            body: treatmentRows,
-            theme: 'striped',
-            headStyles: { fillColor: [59, 130, 246] }
-        });
-        
-        doc.save(`ganado_reporte_${dateStr}.pdf`);
+        if (selectedTreatment.length > 0) {
+            doc.text("Historial de Tratamientos", 14, currentY);
+
+            const treatmentColumnMap = {
+                date:             { label: 'Fecha',          get: t => t.date },
+                tagNumber:        { label: 'N° Placa',       get: t => t.tagNumber },
+                diagnosis:        { label: 'Diagnóstico',    get: t => t.diagnosis },
+                treatmentText:    { label: 'Tratamiento',    get: t => t.treatmentText },
+                vetName:          { label: 'Veterinario',    get: t => t.vetName || '-' },
+                nextAppointment:  { label: 'Próxima Cita',   get: t => t.nextAppointment || '-' }
+            };
+
+            const treatmentHeaders = selectedTreatment.map(f => treatmentColumnMap[f]?.label || f);
+            const treatmentRows = treatments.map(t => selectedTreatment.map(f => treatmentColumnMap[f]?.get(t) ?? '-'));
+
+            doc.autoTable({
+                startY: currentY + 5,
+                head: [treatmentHeaders],
+                body: treatmentRows,
+                theme: 'striped',
+                headStyles: { fillColor: [59, 130, 246] }
+            });
+        }
+
+        doc.save(`ganado_reporte${fileSuffix}_${dateStr}.pdf`);
     }
 }
 
-async function importDatabase(jsonString) {
+async function importDatabase(data) {
     try {
-        const parsed = JSON.parse(jsonString);
-        
         let animals = [];
         let treatments = [];
-        
-        // Backward compatibility: if array, it's just animals from v1
-        if (Array.isArray(parsed)) {
-            animals = parsed;
-        } else if (parsed && typeof parsed === 'object') {
-            animals = parsed.animals || [];
-            treatments = parsed.treatments || [];
+
+        if (typeof data === 'string') {
+            // JSON backup (string)
+            const parsed = JSON.parse(data);
+            // Backward compatibility: if array, it's just animals from v1
+            if (Array.isArray(parsed)) {
+                animals = parsed;
+            } else if (parsed && typeof parsed === 'object') {
+                animals = parsed.animals || [];
+                treatments = parsed.treatments || [];
+            } else {
+                throw new Error("Formato inválido");
+            }
+        } else if (data && typeof data === 'object') {
+            // Already parsed object (e.g. from XLSX import)
+            animals = data.animals || [];
+            treatments = data.treatments || [];
         } else {
             throw new Error("Formato inválido");
         }

@@ -23,10 +23,14 @@
             <button class="btn btn-secondary" onclick="document.getElementById('importFile').click()" style="justify-content: center;">
                 <i data-lucide="upload-cloud"></i> Importar Datos
             </button>
-            <input type="file" id="importFile" accept=".json" class="hidden" onchange="handleImport(event)">
+            <input type="file" id="importFile" accept=".json,.xlsx" class="hidden" onchange="handleImport(event)">
             
             <button class="btn btn-secondary" onclick="openExportModal()" style="justify-content: center;">
                 <i data-lucide="download-cloud"></i> Exportar Datos
+            </button>
+            
+            <button class="btn btn-secondary" onclick="openBackupModal()" style="justify-content: center;">
+                <i data-lucide="database"></i> Respaldar base de datos
             </button>
         </div>
     </aside>
@@ -59,6 +63,39 @@
                     <div class="stat-info">
                         <h3>Registrados este mes</h3>
                         <p id="stat-month">0</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dashboard Widgets: Calendar & Reminders -->
+            <div class="dashboard-widgets">
+                <div class="widget-card calendar-widget">
+                    <div class="widget-header">
+                        <h2><i data-lucide="calendar"></i> Calendario de Citas</h2>
+                        <div class="calendar-nav">
+                            <button class="btn-icon" id="prev-month"><i data-lucide="chevron-left"></i></button>
+                            <span id="calendar-month-year"></span>
+                            <button class="btn-icon" id="next-month"><i data-lucide="chevron-right"></i></button>
+                        </div>
+                    </div>
+                    <div class="calendar-grid">
+                        <div class="calendar-day-header">Dom</div>
+                        <div class="calendar-day-header">Lun</div>
+                        <div class="calendar-day-header">Mar</div>
+                        <div class="calendar-day-header">Mié</div>
+                        <div class="calendar-day-header">Jue</div>
+                        <div class="calendar-day-header">Vie</div>
+                        <div class="calendar-day-header">Sáb</div>
+                        <div class="calendar-days" id="calendar-days-container"></div>
+                    </div>
+                </div>
+                
+                <div class="widget-card reminders-widget">
+                    <div class="widget-header">
+                        <h2><i data-lucide="bell"></i> Recordatorio de Citas</h2>
+                    </div>
+                    <div class="reminders-list" id="reminders-list-container">
+                        <!-- Reminders will be populated by JS -->
                     </div>
                 </div>
             </div>
@@ -117,8 +154,10 @@
                         <tr>
                             <th>Fecha</th>
                             <th>N° Placa</th>
+                            <th></th> <!-- View Button Column -->
                             <th>Diagnóstico</th>
                             <th>Veterinario</th>
+                            <th>Próxima Cita</th>
                             <th>Acciones</th>
                         </tr>
                     </thead>
@@ -256,6 +295,11 @@
                             <label>Contacto del Veterinario</label>
                             <input type="text" id="t_vetContact" class="form-control" placeholder="Teléfono o Email">
                         </div>
+                        
+                        <div class="form-group full-width">
+                            <label>Próxima Cita (Opcional)</label>
+                            <input type="date" id="t_nextAppointment" class="form-control">
+                        </div>
                     </div>
                 </form>
             </div>
@@ -278,7 +322,7 @@
 
     <!-- Export Modal -->
     <div class="modal-overlay" id="exportModal">
-        <div class="modal-content" style="max-width: 450px;">
+        <div class="modal-content" style="max-width: 520px;">
             <div class="modal-header">
                 <h2>Exportar Datos</h2>
                 <button class="modal-close" onclick="closeExportModal()"><i data-lucide="x"></i></button>
@@ -286,15 +330,54 @@
             <div class="modal-body">
                 <div class="form-group">
                     <label>Formato de Exportación</label>
-                    <select id="exportFormat" class="form-control">
-                        <option value="json">Copia de Seguridad (JSON) - Para restaurar datos</option>
-                        <option value="pdf">Documento (PDF) - Para leer o imprimir</option>
-                        <option value="xml">Datos Estructurados (XML)</option>
-                    </select>
-                </div>
-                <div style="background: rgba(16, 185, 129, 0.1); border-left: 3px solid var(--accent); padding: 0.75rem; margin-top: 1.5rem; border-radius: 0.25rem;">
+                      <select id="exportFormat" class="form-control">
+                          <option value="pdf">Documento (PDF) - Para leer o imprimir</option>
+                          <option value="xlsx">Excel (XLSX) - Para análisis en hojas de cálculo</option>
+                      </select>
+                 </div>
+
+                 <!-- Report Type (only for PDF) -->
+                 <div class="form-group" id="reportTypeGroup" style="display: none; margin-top: 0.75rem;">
+                     <label>Tipo de Reporte</label>
+                     <div style="display: flex; gap: 1rem; margin-top: 0.2rem;">
+                         <label style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; cursor: pointer;">
+                             <input type="radio" name="reportType" value="completo" checked onchange="updateExportOptionsVisibility()"> Completo
+                         </label>
+                         <label style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; cursor: pointer;">
+                             <input type="radio" name="reportType" value="compacto" onchange="updateExportOptionsVisibility()"> Compacto
+                         </label>
+                     </div>
+                 </div>
+
+                 <!-- Compact field selector -->
+                 <div id="compactOptions" style="display: none; margin-top: 0.5rem; padding: 0.6rem; background: rgba(255,255,255,0.03); border-radius: 0.35rem; border: 1px solid var(--card-border);">
+                     <div style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.4rem; font-weight: 600;">Selecciona los parámetros a incluir en el reporte compacto:</div>
+                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem 1rem; font-size: 0.82rem;">
+                         <!-- Animal columns -->
+                         <div>
+                             <div style="font-weight: 600; margin-bottom: 0.2rem; color: #86efac;">Datos de Animales</div>
+                             <label style="display:block;"><input type="checkbox" class="compact-field" data-section="animal" value="tagNumber" checked> N° Placa</label>
+                             <label style="display:block;"><input type="checkbox" class="compact-field" data-section="animal" value="name" checked> Nombre</label>
+                             <label style="display:block;"><input type="checkbox" class="compact-field" data-section="animal" value="breed" checked> Raza</label>
+                             <label style="display:block;"><input type="checkbox" class="compact-field" data-section="animal" value="birthInfo" checked> Edad / Nacimiento</label>
+                             <label style="display:block;"><input type="checkbox" class="compact-field" data-section="animal" value="weightKg" checked> Peso</label>
+                         </div>
+                         <!-- Treatment columns -->
+                         <div>
+                             <div style="font-weight: 600; margin-bottom: 0.2rem; color: #93c5fd;">Datos de Tratamientos</div>
+                             <label style="display:block;"><input type="checkbox" class="compact-field" data-section="treatment" value="date" checked> Fecha</label>
+                             <label style="display:block;"><input type="checkbox" class="compact-field" data-section="treatment" value="tagNumber" checked> N° Placa</label>
+                             <label style="display:block;"><input type="checkbox" class="compact-field" data-section="treatment" value="diagnosis" checked> Diagnóstico</label>
+                             <label style="display:block;"><input type="checkbox" class="compact-field" data-section="treatment" value="treatmentText" checked> Tratamiento</label>
+                             <label style="display:block;"><input type="checkbox" class="compact-field" data-section="treatment" value="vetName" checked> Veterinario</label>
+                             <label style="display:block;"><input type="checkbox" class="compact-field" data-section="treatment" value="nextAppointment" checked> Próxima Cita</label>
+                         </div>
+                     </div>
+                 </div>
+
+                 <div style="background: rgba(16, 185, 129, 0.1); border-left: 3px solid var(--accent); padding: 0.75rem; margin-top: 1.25rem; border-radius: 0.25rem;">
                     <p style="font-size: 0.8rem; color: var(--text-primary); margin: 0;">
-                        <strong>Importante:</strong> Solo el formato <strong>JSON</strong> se puede usar para <em>Importar Datos</em> posteriormente.
+                         <strong>Importante:</strong> Los formatos <strong>JSON</strong> y <strong>XLSX</strong> se pueden usar para <em>Importar Datos</em> posteriormente (XLSX debe tener hojas "Animals" y "Treatments").
                     </p>
                 </div>
             </div>
@@ -305,9 +388,47 @@
         </div>
     </div>
 
+    <!-- Backup Modal -->
+    <div class="modal-overlay" id="backupModal">
+        <div class="modal-content" style="max-width: 420px;">
+            <div class="modal-header">
+                <h2>Respaldar base de datos</h2>
+                <button class="modal-close" onclick="closeBackupModal()"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 1rem; font-size: 0.9rem;">
+                    Elige cómo quieres realizar el respaldo completo de toda la información:
+                </p>
+                
+                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; padding: 0.5rem; background: rgba(255,255,255,0.03); border-radius: 0.35rem;">
+                        <input type="radio" name="backupType" value="local" checked>
+                        <div>
+                            <strong>Respaldar localmente</strong><br>
+                            <span style="font-size: 0.8rem; color: var(--text-secondary);">Descarga un archivo JSON con todos los datos.</span>
+                        </div>
+                    </label>
+                    
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; padding: 0.5rem; background: rgba(255,255,255,0.03); border-radius: 0.35rem; opacity: 0.7;">
+                        <input type="radio" name="backupType" value="cloud">
+                        <div>
+                            <strong>Exportar a la nube</strong> <span style="font-size:0.7rem; background:#f59e0b; color:#111; padding:1px 5px; border-radius:3px;">Experimental</span><br>
+                            <span style="font-size: 0.8rem; color: var(--text-secondary);">Sube el respaldo a la nube (próximamente disponible).</span>
+                        </div>
+                    </label>
+                </div>
+            </div>
+            <div class="form-footer">
+                <button class="btn btn-secondary" onclick="closeBackupModal()">Cancelar</button>
+                <button class="btn btn-primary" onclick="executeBackup()"><i data-lucide="save"></i> Iniciar Respaldo</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="db.js"></script>
     <script src="app.js"></script>
 </body>
