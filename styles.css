@@ -411,6 +411,18 @@ tr:hover td {
     border-color: var(--accent);
 }
 
+/* Make date picker icon lighter (better contrast on dark theme) */
+.form-control[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(0.8) brightness(1.15);
+    opacity: 0.85;
+    cursor: pointer;
+    transition: filter 0.2s;
+}
+
+.form-control[type="date"]::-webkit-calendar-picker-indicator:hover {
+    filter: invert(0.9) brightness(1.3);
+}
+
 .form-footer {
     padding: 1.5rem;
     border-top: 1px solid var(--card-border);
@@ -539,6 +551,10 @@ input[type="file"] {
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
+}
+
+.calendar-widget {
+    position: relative;
 }
 
 .widget-header {
@@ -882,4 +898,28 @@ input[type="file"] {
 
 .ticket-btn:active {
     transform: scale(0.98);
+}
+
+/* Calendar day hover tooltip */
+.calendar-tooltip {
+    position: absolute;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.65rem;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+    font-size: 0.78rem;
+    line-height: 1.3;
+    max-width: 240px;
+    z-index: 200;
+    pointer-events: none;
+    display: none;
+    color: var(--text-primary);
+}
+
+.calendar-tooltip strong {
+    font-size: 0.85rem;
+    color: #60a5fa;
+    display: block;
+    margin-bottom: 0.2rem;
 }

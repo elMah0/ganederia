@@ -735,7 +735,73 @@ function getDateAppointmentStatus(dateStr) {
     return 'pending';
 }
 
+function getAppointmentsForDate(dateStr) {
+    return currentTreatments.filter(t => t.nextAppointment === dateStr);
+}
+
+function showCalendarDayTooltip(dayElement) {
+    const dateStr = dayElement.dataset.date;
+    if (!dateStr) return;
+
+    const appts = getAppointmentsForDate(dateStr);
+    if (!appts.length) return;
+
+    const tooltip = document.getElementById('calendar-tooltip');
+    if (!tooltip) return;
+
+    const [y, mo, d] = dateStr.split('-');
+    const monthShort = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    const formatted = `${parseInt(d)} ${monthShort[parseInt(mo)-1]} ${y}`;
+
+    let html = `<strong>${formatted}</strong>`;
+
+    html += `<div style="margin-top: 0.2rem; font-size: 0.75rem;">`;
+    const maxShow = 3;
+    appts.slice(0, maxShow).forEach(t => {
+        const animal = currentAnimals.find(a => a.id === t.animalId);
+        const animalLabel = animal && animal.name ? `${t.tagNumber} (${animal.name})` : t.tagNumber;
+        const shortDiag = t.diagnosis ? (t.diagnosis.length > 32 ? t.diagnosis.substring(0, 29) + '...' : t.diagnosis) : '';
+        html += `• ${animalLabel} — ${shortDiag}<br>`;
+    });
+    if (appts.length > maxShow) {
+        html += `+ ${appts.length - maxShow} más`;
+    }
+    html += `</div>`;
+
+    tooltip.innerHTML = html;
+
+    // Position the tooltip below the day cell, relative to the calendar-widget
+    const widget = dayElement.closest('.calendar-widget');
+    if (!widget) return;
+
+    const cellRect = dayElement.getBoundingClientRect();
+    const widgetRect = widget.getBoundingClientRect();
+
+    const tooltipWidth = 230;
+    let left = cellRect.left - widgetRect.left + (cellRect.width / 2) - (tooltipWidth / 2);
+    let top = cellRect.bottom - widgetRect.top + 8;
+
+    // Keep inside the widget bounds
+    if (left < 8) left = 8;
+    if (left + tooltipWidth > widgetRect.width - 8) {
+        left = widgetRect.width - tooltipWidth - 8;
+    }
+
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+    tooltip.style.display = 'block';
+}
+
+function hideCalendarDayTooltip() {
+    const tooltip = document.getElementById('calendar-tooltip');
+    if (tooltip) {
+        tooltip.style.display = 'none';
+    }
+}
+
 function renderCalendar() {
+    hideCalendarDayTooltip();
+
     const container = document.getElementById('calendar-days-container');
     const monthYearLabel = document.getElementById('calendar-month-year');
     if (!container || !monthYearLabel) return;
@@ -776,10 +842,18 @@ function renderCalendar() {
         const status = getDateAppointmentStatus(dateStr);
         if (status) {
             cell.classList.add('has-appointment', `appointment-${status}`);
+            cell.dataset.date = dateStr;
         }
 
         container.appendChild(cell);
     }
+
+    // Attach hover tooltips to days that have appointments
+    const daysWithAppointments = container.querySelectorAll('.calendar-day[data-date]');
+    daysWithAppointments.forEach(day => {
+        day.addEventListener('mouseenter', () => showCalendarDayTooltip(day));
+        day.addEventListener('mouseleave', hideCalendarDayTooltip);
+    });
 
     lucide.createIcons();
 }
